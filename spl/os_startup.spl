@@ -1,0 +1,24 @@
+[READY_LIST + 0] = 0;
+
+load(25,21);
+load(26,22);
+load(27,23);
+
+PTBR = PAGE_TABLE;
+PTLR = 4;
+
+[PTBR + 0] = 25;
+[PTBR + 1] = "01";
+[PTBR + 2] = 26;
+[PTBR + 3] = "01";
+[PTBR + 4] = 27;
+[PTBR + 5] = "01";
+[PTBR + 6] = 28;
+[PTBR + 7] = "01";
+
+[READY_LIST + 1] = 2;
+SP = 3 * 512;
+
+[28 * 512] = 0;
+
+ireturn;
