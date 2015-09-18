@@ -1,0 +1,64 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
+
+alias sysCallNo S1;
+sysCallNo = [physicalSP-1];
+
+alias fileName S2;
+fileName = [physicalSP - 3];
+
+alias i S3;
+i = 0;
+
+alias basicBlock S4;
+
+if(sysCallNo == 1) then
+	while (i < 64 && [FAT + i*8] != fileName) do
+		i = i + 1;
+	endwhile;
+	
+	if(i < 64) then
+		[physicalSP - 2] = 0;
+		ireturn;
+	endif;
+	
+	i = 24;
+	while(i<=447 && [DISK_LIST + i]!=0) do
+		i = i + 1;
+	endwhile;
+	
+	if(i > 447) then
+		[physicalSP-2] = -1;
+		ireturn;
+	endif;
+	
+	basicBlock = i;
+	i = 0;
+	
+	while (i < 64 && [FAT + i*8+2] != -1) do
+		i = i + 1;
+	endwhile;
+	
+	if(i == 64) then
+		[physicalSP - 2] = -1;
+		ireturn;		
+	endif;
+	
+	[FAT + i * 8] = fileName;
+	[FAT + i * 8 + 1] = 0;
+	[FAT + i * 8 + 2] = basicBlock;
+	
+	i = 0;
+	while(i < 256) do
+		[SCRATCHPAD + i] = -1;
+		i = i + 1;
+	endwhile;
+	
+	store(1, basicBlock);
+	[DISK_LIST + basicBlock] = 1;
+	store(5, 19);
+	store(6, 20);
+	[physicalSP - 2] = 0;
+	ireturn;
+	
+endif;
