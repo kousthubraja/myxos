@@ -9,14 +9,20 @@ load(25,21);
 load(26,22);
 load(27,23);
 
-load (11, 5);
-load (12, 6);
-
 load(5, 19);
 load(6, 20);
 
 load (9, 3);
 load (10, 4);
+
+load (11, 5);
+load (12, 6);
+load (13, 7);
+load (14, 8);
+load (15, 9);
+load (16, 10);
+load (17, 11); 
+load (18, 12);
 
 PTBR = PAGE_TABLE;
 PTLR = 4;
@@ -59,6 +65,16 @@ PTBR_Process1 = 1024 + 1 * 8;
 
 [READY_LIST + 36] = 0;
 
- 
+//Initialise system-wide open file table
+alias i S0;
+
+i = 0;
+while( i < 128) do
+ [FILE_TABLE + i + 0] = -1;
+ [FILE_TABLE + i + 1] = 0;
+ i = i + 2;
+endwhile;
+
+
 ireturn;
 
