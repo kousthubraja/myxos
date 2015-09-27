@@ -1,0 +1,18 @@
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
+
+// Get system call no. from the stack and put it in a register
+// Get arguments from stack and put it in registers
+alias sysCallNo S1;
+sysCallNo = [physicalSP -1];
+
+alias filename S2;
+filename = [physicalSP - 2];
+
+
+
+if ( sysCallNo == 1) then
+	// Implementation of Create 
+	.
+	.
+endif;
