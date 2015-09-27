@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-in
-=======
 alias physicalSP S0;
 physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
 
@@ -42,7 +39,7 @@ if(sysCallNo == 1) then
 		i = i + 1;
 	endwhile;
 	
-	if(i == 64)
+	if(i == 64) then
 		[physicalSP - 2] = -1;
 		ireturn;		
 	endif;
@@ -65,4 +62,3 @@ if(sysCallNo == 1) then
 	ireturn;
 	
 endif;
->>>>>>> 8b1f232841048dcc21e736e8199b0bb7a14e8ce6

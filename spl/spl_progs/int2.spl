@@ -1,0 +1,219 @@
+// Code for interrupt 2
+
+// implements Open and Close system calls
+
+// get the system call number
+// it will be stored in location SP - 1
+// since code is executing in kernel mode, convert to physical address first
+
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
+
+// find out the system call number
+
+alias sysCallNo S1;
+sysCallNo = [physicalSP - 1];
+
+// needed for accessing PPOFT of the processes
+alias currentPCB S5;
+currentPCB = READY_LIST + 32 * ((PTBR - 1024) / 8);	// that expression after 32 is PID of the current process
+
+// HAS NOT BEEN TESTED YET
+
+if (sysCallNo == 2) then
+
+	// implementation of Open
+	
+	// fetch the argument(s) from SP - 2 onwards
+	// there is only one argument
+
+	alias fileName S2;
+	fileName = [physicalSP - 3];	// note the three, not two
+	
+	// check if file has already been created
+	
+	alias FATIndex S3;
+	FATIndex = 0;
+	
+	// there can be max 64 files
+	// each FAT entry takes 8 words
+	
+	while (FATIndex < 64) do
+	
+		if ([FAT + FATIndex * 8] == fileName) then
+		
+			// break and then process
+			break;			
+			
+		endif;
+		
+		FATIndex = FATIndex + 1;	
+		
+	endwhile;
+	
+	if (FATIndex == 64) then
+	
+		// file not found
+		// return with -1 exit status
+	
+		[physicalSP - 2] = -1;
+		ireturn;
+	
+	endif;
+	
+	// file exists, and the index is stored in FATIndex
+	// so to access the file details, go to FAT + FATIndex * 8		
+	
+	// now search the System-Wide Open File Table for the Index
+	// it starts at memory location 1344 (constant FILE_TABLE)
+	
+	alias SWOFTIndex S4;
+	SWOFTIndex = 0;
+	
+	while (SWOFTIndex < 64) do
+	
+		if ([SWOFTIndex * 2 + FILE_TABLE] == FATIndex) then
+		
+			// we have the corresponding SWOFT Entry
+			// break and proceed
+			break;
+			
+		endif;
+		
+		SWOFTIndex = SWOFTIndex + 1;
+		
+	endwhile;
+	
+	if (SWOFTIndex >= 64) then
+	
+		// entry does not exist
+		// so create one
+		
+		// search the SWOFT for a free entry
+		
+		SWOFTIndex = 0;
+		
+		while (SWOFTIndex < 64) do
+		
+			if ([FILE_TABLE + SWOFTIndex * 2] == -1) then
+			
+				// we have a free slot
+				break;
+			
+			endif;
+		
+			SWOFTIndex = SWOFTIndex + 1;
+		
+		endwhile;
+		
+		if (SWOFTIndex >= 64) then
+		
+			// no free entry found
+			// return with exit status
+			
+			[physicalSP - 2] = -1;
+			ireturn;
+		
+		endif;
+		
+		[SWOFTIndex * 2 + 1] = 0;	// setting initial file count to zero
+		// done because later in the code no matter what the situation is 
+		// (i.e. if we are creating a new entry or reusing an old one, we just increment the file count
+		// for this to work correctly SWOFT must have a legal initial value (which is zero)
+		
+	endif;
+	
+	// store the details of the file in the Per-Process Open File Table in its PCB
+	// a single file may be opened more than once by the same process
+	// so directly proceed to checking
+	
+	alias PPOFTIndex S6;
+	PPOFTIndex = 0;
+	
+	while (PPOFTIndex < 8) do
+	
+		if ([currentPCB + 15 + PPOFTIndex * 2] == -1) then
+		
+			// we have a free slot in the PPOFT
+			break;
+		
+		endif;
+		
+		PPOFTIndex = PPOFTIndex + 1;
+	
+	endwhile;
+	
+	if (PPOFTIndex == 8) then
+	
+		// no free entry found
+		// return with exit status
+			
+		[physicalSP - 2] = -1;
+		ireturn;
+	
+	endif;
+	
+	// set the entries of the PPOFT
+	[currentPCB + 15 + PPOFTIndex * 2] = SWOFTIndex;	// pointer to SWOFT entry
+	[currentPCB + 15 + PPOFTIndex * 2 + 1] = 0;	// LSEEK position
+	
+	// we have a valid index in the SWOFT stored in SWOFTIndex
+	// update the same
+	
+	[FILE_TABLE + SWOFTIndex * 2] = FATIndex;	// store the FAT Index if it hasn't already
+	// if it has it'll just get overwritten with the same value
+	[FILE_TABLE + SWOFTIndex * 2 + 1] = [FILE_TABLE + SWOFTIndex * 2 + 1] + 1;	// increment count of open instances
+	
+	// return PPOFTIndex
+	// this is the file descriptor for the open instance
+	[physicalSP - 2] = PPOFTIndex;
+	ireturn;
+			
+// endif for system call number 2	
+endif;
+
+if (sysCallNo == 3) then
+
+	// implementation of the Close system call
+	
+	alias fileDescriptor S2;
+	fileDescriptor = [physicalSP - 3];
+	
+	if (fileDescriptor > 7 || fileDescriptor < 0) then
+		
+		// invalid entry
+		[physicalSP - 2] = -1;
+		ireturn;
+		
+	endif;
+	
+	// check if the PPOFT entry is valid
+	if ([currentPCB + 15 + fileDescriptor * 2] == -1) then
+	
+		// invalid entry
+		[physicalSP - 2] = -1;
+		ireturn;
+	
+	endif;
+	
+	// we have a valid index to SWOFT
+	// index into it and decrement file count
+	[FILE_TABLE + [currentPCB + 15 + fileDescriptor * 2] * 2 + 1] = [FILE_TABLE + [currentPCB + 15 + fileDescriptor * 2] * 2 + 1] - 1;
+	if ([FILE_TABLE + [currentPCB + 15 + fileDescriptor * 2] * 2 + 1] == 0) then
+	
+		// there are no more references to the file
+		// invalidate the entry in SWOFT
+		
+		[FILE_TABLE + [currentPCB + 15 + fileDescriptor * 2] * 2] = -1;
+	
+	endif;
+	
+	// invalidate the PPOFT by setting fields to -1
+	[currentPCB + 15 + fileDescriptor * 2] = -1;
+	[currentPCB + 15 + fileDescriptor * 2 + 1] = -1;
+	
+	// return with success as exit status
+	[physicalSP - 2] = 0;
+	ireturn;
+	
+endif;r
