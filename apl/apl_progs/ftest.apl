@@ -30,6 +30,7 @@ integer main()
 			print(result);
 		endif;
 		if(option == 2) then
+			print("Filename? : ");
 			read(fileName);
 			FILE = Open(fileName);
 			print(FILE);

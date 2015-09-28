@@ -262,4 +262,11 @@ if (sysCallNo == 4) then
 	[physicalSP - 2] = 0;
 	ireturn;
 	
-endif;
+endif;	
+	load(1, [FAT + FATIndex * 8 + 2]);
+	counter = 0;
+	while (counter < 512) do
+		[SCRATCHPAD + counter] = "";
+		counter = counter + 1;	
+	endwhile;
+	store(1, [FAT + FATIndex * 8 + 2]);
