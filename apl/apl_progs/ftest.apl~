@@ -2,7 +2,6 @@ decl
 	integer option;
 	integer result;
 	string fileName;
-	
 enddecl
 
 integer main()

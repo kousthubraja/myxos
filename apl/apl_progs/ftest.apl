@@ -2,7 +2,7 @@ decl
 	integer option;
 	integer result;
 	string fileName;
-	
+	integer FILE;
 enddecl
 
 integer main()
@@ -21,22 +21,31 @@ integer main()
 			break;
 		endif;
 		
-		print("Filename? : ");
-		read(fileName);	
+		
+		
 		if(option == 1) then
+			print("Filename? : ");
+			read(fileName);	
 			result = Create(fileName);
+			print(result);
 		endif;
 		if(option == 2) then
-			result = Open(fileName);
+			read(fileName);
+			FILE = Open(fileName);
+			print(FILE);
 		endif;
 		if(option == 3) then
-			result = Close(fileName);
+			result = Close(FILE);
+			print(result);
 		endif;
 		if(option == 4) then
+			print("Filename? : ");
+			read(fileName);	
 			result = Delete(fileName);
+			print(result);
 		endif;
 		
-		print(result);
+		
 		read(option);
 	endwhile;
 	
