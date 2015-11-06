@@ -1,45 +1,60 @@
+// Code for Interrupt 1
 
+// get the system call number
+// it will be stored in location SP - 1
+// since code is executing in kernel mode, convert to physical address first
 
 alias physicalSP S0;
 physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
 
-
+// find out the system call number
 
 alias sysCallNo S1;
 sysCallNo = [physicalSP - 1];
 
-
+// fetch the argument(s) from SP - 2 onwards
+// there is only one argument
 
 alias fileName S2;
-fileName = [physicalSP - 3];	
+fileName = [physicalSP - 3];	// note the three, not two
 
 if (sysCallNo == 1) then
 
+	// implementation of Create
 	
+	// before that check if file has already been created
 	
 	alias FATIndex S3;
 	FATIndex = 0;
 	
-	// total 64 
-	
+	// there can be max 64 files
+	// each FAT entry takes 8 words
 	
 	while (FATIndex < 64) do
 		
-		if ([FAT + FATIndex * 8] == fileName) then
-		         // found
-			[physicalSP - 2] = 0;
-			ireturn;
-			
+		if ([FAT + FATIndex * 8] == fileName) then		
+			// return after setting status value zero
+			// return value is stored in SP - 2
+			[physicalSP - 2] = 0;			
+			// return back
+			ireturn;			
 		endif;
 		
 		FATIndex = FATIndex + 1;	
 		
 	endwhile;
 	
-
+	// no such file exists
+	// so create it
 	
-	alias DFListIndex S4;	
-	DFListIndex = 0;
+	// search the memory copy of the disk free list
+	
+	// Disk Free List is stored after FAT
+	// So FAT + 512 should get you straight there
+	// 447 because the remaining space is used as swap area
+	
+	alias DFListIndex S4;	// Disk Free List Index
+	DFListIndex = 24;
 	
 	while (DFListIndex < 447) do		
 		if ([FAT + 512 + DFListIndex] == 0) then		
@@ -49,16 +64,16 @@ if (sysCallNo == 1) then
 	endwhile;
 	
 	if (DFListIndex == 447) then		
-		// full
+		// no valid entry
 		[physicalSP - 2] = -1;
 		ireturn;			
 	endif;
 	
-
-	
+	// find a free slot in the FAT
+		
 	FATIndex = 0;
 	while (FATIndex < 64) do	
-		if ([FAT + FATIndex * 8 + 2] == -1) then
+		if ([FAT + FATIndex * 8 + 2] == -1) then	// checking block number of basic block
 			break;		
 		endif;		
 		FATIndex = FATIndex + 1;	
@@ -69,33 +84,42 @@ if (sysCallNo == 1) then
 		ireturn;	
 	endif;
 	
+	// we have a valid block from disk free list whose index stored in DFListIndex
+	// and a FAT entry index stored in FATIndex
 	
+	// initialize entries of the FAT Index
 	[FAT + FATIndex * 8] = fileName;
-	[FAT + FATIndex * 8 + 1] = 0;	
-	[FAT + FATIndex * 8 + 2] = DFListIndex;	
+	[FAT + FATIndex * 8 + 1] = 0;	// file size
+	[FAT + FATIndex * 8 + 2] = DFListIndex;	// block size of basic block
 	
-	
+	// load the basic block of file to be created
+	// use memory page 1 (which was earlier for OS Startup code)
+	// because it is no longer required
 	load(1, DFListIndex);
 				
-	
+	// set all the words in the basic block to be -1
 	alias ctr S5;
-	ctr = 0;	
+	ctr = 0;	// OS Startup code resides in page 1
 	
 	while (ctr < 256) do
+				
+		// set the value of each entry in basic block to -1
 		[SCRATCHPAD + ctr] = -1;
 		ctr = ctr + 1;
+				
 	endwhile;
 	
-	
+	// write the basic block back
 	store(1, DFListIndex);
 	
+	// set entry in DF List for basic block as 1 (used)
 	[FAT + 512 + DFListIndex] = 1;
 	
-	//  updated  FAT and DFL
-	store(5, 19);	
-	store(6, 20);	
+	// store the updated copies of FAT and Disk Free List onto the disk
+	store(5, 19);	// store the FAT
+	store(6, 20);	// store the Disk Free List
 	
-	
+	// return with success as exit status
 	[physicalSP - 2] = 0;
 	ireturn;	
 	
@@ -103,63 +127,65 @@ endif;
 
 if (sysCallNo == 4) then
 
-	// Delete
+	// implementation of Delete
 	
-	
+	// check if file exists
 	
 	alias FATIndex S3;
 	FATIndex = 0;
 	
-	
+	// there can be max 64 files
+	// each FAT entry takes 8 words
 	
 	while (FATIndex < 64) do
-	
-		if ([FAT + FATIndex * 8] == fileName) then
-			break;			
-			
-		endif;
 		
+		if ([FAT + FATIndex * 8] == fileName) then		
+			// break and then process
+			break;						
+		endif;		
 		FATIndex = FATIndex + 1;	
-		
+			
 	endwhile;
 	
-	if (FATIndex == 64) then
-	
-		// not found
-			
+	if (FATIndex == 64) then	
+		// file does not exist			
 		[physicalSP - 2] = -1;
-		ireturn;
-	
+		ireturn;	
 	endif;
 	
+	// now search the System-Wide Open File Table for the Index
+	// it starts at memory location 1344 (constant FILE_TABLE)
 	
 	alias SWOFTIndex S4;
 	SWOFTIndex = 0;
 	
 	while (SWOFTIndex < 64) do
 	
-		if ([SWOFTIndex * 2 + FILE_TABLE] == FATIndex) then
-			break;
-			
+		if ([SWOFTIndex * 2 + FILE_TABLE] == FATIndex) then		
+			// we have the corresponding SWOFT Entry
+			// break and proceed
+			break;			
 		endif;
 		
 		SWOFTIndex = SWOFTIndex + 1;
 		
 	endwhile;
 	
-	
+	// we assume that if the file has been created properly,
+	// the SWOFTIndex would also have been set properly
 	
 	if (SWOFTIndex < 64 && [SWOFTIndex * 2 + FILE_TABLE + 1] > 0) then
 	
-		// opened **
+		// some process has kept the file open
+		// so can't delete
 		
 		[physicalSP - 2] = -1;
 		ireturn;
 	
 	endif;
 	
-	alias basicDBNo S5;	// Delete **
-	 
+	alias basicDBNo S5;	// basic data block number
+	// goes from 0 to 255 and ensures that each of those blocks is replaced with the empty string
 	basicDBNo = 0;
 	
 	alias blockToClear S6;
@@ -167,28 +193,38 @@ if (sysCallNo == 4) then
 	
 	while (basicDBNo < 256) do
 	
-		// load the basic block 
+		// load the basic block onto the OS scratchpad
 		load(1, [FAT + FATIndex * 8 + 2]);
 		
+		// get the block number to delete
 		blockToClear = [SCRATCHPAD + basicDBNo];
+		
+		// incremented soon because we might come across continue
 		basicDBNo = basicDBNo + 1;
+		
 		if (blockToClear == -1) then
 			continue;
 		endif;
 		
-		// only 1 scratchpad **
+		// load that block onto the scratchpad
 		load(1, blockToClear);
+		
+		// invalidate all entries of that block
+		
 		counter = 0;
-		//crear with free space **
-                while (counter < 512) do
+		
+		while (counter < 512) do
 		
 			[SCRATCHPAD + counter] = "";		
 			counter = counter + 1;
 		
 		endwhile;
+		
+		// store the block back
 		store(1, blockToClear);
-	
-		// DFL in 3072 
+		
+		// set the data block as unused in the disk free list
+		// disk free list is stored from word number 3072 in memory
 		[3072 + blockToClear] = 0;
 	
 	endwhile;
@@ -202,16 +238,20 @@ if (sysCallNo == 4) then
 		counter = counter + 1;	
 	endwhile;
 	store(1, [FAT + FATIndex * 8 + 2]);
+	[3072 + [FAT + FATIndex * 8 + 2]] = 0;	// mark basic block as free
 	
-	// Free FAT entry **
+	// invalidate the FAT entry
 	[FAT + FATIndex * 8] = -1;
+	[FAT + FATIndex * 8 + 1] = 0;	// size
 	[FAT + FATIndex * 8 + 2] = -1;
 	
-	// update FAT , DFL
-	store(5, 19);	
-	store(6, 20);	
+	// store back the FAT and Disk Free List from the memory to disk
+	store(5, 19);	// FAT
+	store(6, 20);	// Disk Free List
 	
+	// return with a zero
 	[physicalSP - 2] = 0;
 	ireturn;
 	
 endif;
+

@@ -1,82 +1,78 @@
+// OS Startup code for XOS
+
+// we need load only a single process
+// so this file was built on top of the version from Stage 5
+
+// format of load is load (page_number, block_number); 
+
+// exception handler is stored in blocks 1 and 2 in the disk
+// load them to memory blocks 7 and 8
+// see memory and disk organization
+
+load(7, 1);
+load(8, 2);
+
+
+// load interrupt routine 7
+// I think that's HALT
+
+load(23, 17);
+load(24, 18);
+
+// allocate PID of first process which is INIT
+
 [READY_LIST + 0] = 0;
 
-load(7,1);
-load(8,2);
-load(23,17);
-load(24,18);
+// memory for user processes start at block 25
+// INIT code is stored in blocks 21-23 in the disk
+// load the code onto memory
 
-load(25,21);
-load(26,22);
-load(27,23);
+load(25,21); 
+load(26,22); 
+load(27,23); 
 
-load(5, 19);
-load(6, 20);
+// page table for INIT must be set up for 
+// address translation scheme to work correctly
+// the list of all page tables start at memory address 1024
+// page table for each process has 8 words
+// so PID x 8 + 1024 gives the physical address of each process table
 
-load (9, 3);
-load (10, 4);
+PTBR = 1024;
+PTLR = 4;	// by default
 
-load (11, 5);
-load (12, 6);
-load (13, 7);
-load (14, 8);
-load (15, 9);
-load (16, 10);
-load (17, 11); 
-load (18, 12);
-
-PTBR = PAGE_TABLE;
-PTLR = 4;
+// set up entries for page table
+// first word has physical address
+// second word has auxiliary information, which is
+// referenced? and valid?
+// four pages - three for code and one for stack
 
 [PTBR + 0] = 25;
-[PTBR + 1] = "01";
+[PTBR + 1] = "01";	// not referenced but valid
 [PTBR + 2] = 26;
 [PTBR + 3] = "01";
 [PTBR + 4] = 27;
 [PTBR + 5] = "01";
-[PTBR + 6] = 28;
+[PTBR + 6] = 28;	// memory for stack
 [PTBR + 7] = "01";
 
-[READY_LIST + 1] = 2;
-SP = 3 * 512;
 
-[28 * 512] = 0;
+// set the entries of the System-Wide Open File Table to invalid
+// an invalid entry is indicated by -1 in the FAT Index field
+// and File Open Counts to zero
+// FILE_TABLE stores the address of the System Wide Open File Table
 
-[READY_LIST + 32] = 1;
-load(29,25 ); 
-
-alias PTBR_Process1 S0;
-PTBR_Process1 = 1024 + 1 * 8; 
-
-[PTBR_Process1 + 0] = 29;
-[PTBR_Process1 + 1] = "01";
-[PTBR_Process1 + 2] = -1;
-[PTBR_Process1 + 3] = "00";
-[PTBR_Process1 + 4] = -1;
-[PTBR_Process1 + 5] = "00";
-[PTBR_Process1 + 6] = 30;
-[PTBR_Process1 + 7] = "01";
-
-[READY_LIST + 33] = 1;
-[READY_LIST + 37] = PTBR_Process1;
-[READY_LIST + 38] = 4;
-
-[READY_LIST + 34] = 3 * 512;
-[READY_LIST + 35] = 3 * 512;
-
-[READY_LIST + 36] = 0;
-
-//Initialise system-wide open file table
-alias i S0;
-
-i = 0;
-while( i < 128) do
- [FILE_TABLE + i + 0] = -1;
- [FILE_TABLE + i + 1] = 0;
- i = i + 2;
+alias counter S0;			
+counter = 0;
+while ( counter <  128) do			// 64 entries, each of size 2 words
+	[FILE_TABLE + counter + 0] = -1;	// Set FAT Index to -1
+	[FILE_TABLE + counter + 1] =  0;	// Set File Open Count to 0
+	counter = counter + 2;			// Move to next entry
 endwhile;
 
-alias counter S0;
+// set the per-process open file table entries of the INIT process to invalid
+
 counter = 0;
+
 while (counter < 16) do
 
 	[READY_LIST + 15 + counter] = -1;
@@ -84,6 +80,107 @@ while (counter < 16) do
 	
 endwhile;
 
+// breakpoints can be used for debugging
+
+// breakpoint;
+
+// the value of SP must be set to its starting logical address,
+// which starts form the 3 * 512 = 1536)
+
+SP = 3 * 512;
+
+// every program in memory starts from logical address 0
+// so we need IP to point to 0
+// but we can't do this explicitly
+// but if we put value 0 to the top of the stack,
+// IRET will implicitly set IP to this value
+// so we need stack of the INIT process to be assigned value 0
+// each page is 512 words long, stack starts from page number 28, so
+
+[28 * 512] = 0;
+
+// load interrupt routine 1
+// stored in disk blocks 5 and 6
+// in memory stored in pages 11 and 12
+
+load(11, 5);
+load(12, 6);
+
+// load the timer interrupt routine
+// stored in disk blocks 3 and 4
+// stored in pages 9 and 10 in memory
+
+load(9, 3);
+load(10, 4);
+
+// similarly load interrupt routines 2, 3 and 4
+
+// load interrupt routine 2
+load(13, 7);
+load(14, 8);
+// interrupt routine 3
+load(15, 9);
+load(16, 10);
+// interrupt routine 4
+load(17, 11);
+load(18, 12);
+// interrupt routine 5
+load(19, 13);
+load(20, 14);
+// interrupt routine 6
+load(21, 15);
+load(22, 16);
+// interrupt routine 7
+load(23, 17);
+load(24, 18);
+
+// we're creating a new file
+// so a new FAT entry is to be created
+
+// before that LOAD the FAT and Disk Free List onto memory
+
+// load the FAT
+load(5, 19);
+
+// load the Disk Free List
+load(6, 20);
+
+// assign values to Memory Free List
+
+counter = 0;
+while (counter < 29) do
+	// pages till 24 system reserved
+	// then till 28 used by INIT
+	[MEM_LIST + counter] = 1;	// set as used
+	counter = counter + 1;
+endwhile;
+while (counter < 64) do
+	// set as available
+	[MEM_LIST + counter] = 0;
+	counter = counter + 1;
+endwhile;
+
+// initialize all PCBs with STATE field zero
+
+counter = 0;
+while (counter < 32) do
+	// 32 because there can be 32 processes in memory
+	[READY_LIST + counter * 32 + 1] = 0;
+	counter = counter + 1;
+endwhile;
+
+// when there are more than one process in memory, the running process is
+// identified by looking at the STATE field in the Ready List of PCBs
+// this fact will come in use later
+
+[READY_LIST + 1] = 2; // set the PCB entry of INIT for STATE as running
+[READY_LIST + 31] = 0;	// set the parent of INIT as itself
+
+// use ireturn to transfer control to user program
+// ireturn translates to IRET machine instruction
+
+// again, breakpoints can be used for debugging
+
+// breakpoint;
 
 ireturn;
-

@@ -1,46 +1,135 @@
+// code for timer interrupt for XOS
+
+// now the hardest part -- the scheduler
+// the timer interrupt routine is the XOS scheduler
+
+// find the PID of the currently running process
+// PID is calculated from the value of the PTBR
+// using the formula (PTBR - 1024) / 8
+// This is because, the Per-Process Page tables are stored in memory from
+// address 1024 onwards and each page table is of size 8 words.
+
 alias currentPID S0;
 currentPID = (PTBR - 1024) / 8;
-alias currentPCB S1;
-currentPCB = READY_LIST + 32 * currentPID;
-[currentPCB + 1 ] = 1;
-[currentPCB + 2 ] = BP;
-[currentPCB + 3 ] = SP - 1;
-alias physicalSP S2;
-physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512); 
-[currentPCB + 4 ] = [physicalSP];
-[currentPCB + 5 ] = PTBR;
-[currentPCB + 6 ] = PTLR;
-[currentPCB + 7 ] = R0;
-[currentPCB + 8 ] = R1;
-[currentPCB + 9 ] = R2;
-[currentPCB + 10 ] = R3;
-[currentPCB + 11 ] = R4;
-[currentPCB + 12 ] = R5;
-[currentPCB + 13 ] = R6; 
-[currentPCB + 14 ] = R7;
-alias newphysicalSP S2;
-alias newPCB S3;
-alias newPID S4;
-newPID=currentPID+1;
-newPCB=READY_LIST + 32 * newPID;
-while([newPCB+1]!=1) do
-newPID=(newPID+1)%32;
-newPCB=READY_LIST + 32 * newPID;
+
+// get the very next PID (if there ever was a process)
+
+alias newPID S3;
+newPID = currentPID + 1;
+
+// allocate space for PCB corresponding to newPID
+
+alias newPCB S4;
+
+while (newPID % 32 != currentPID) do
+
+	newPCB = READY_LIST + 32 * (newPID % 32);
+	
+	// check the state corresponding to newPCB
+	
+	if ([newPCB + 1] == 1) then
+	
+		// find the location of the PCB from PID of the current process
+		// address of PCB = 1536 + 32 x currentPID
+		alias currentPCB S1;
+		currentPCB = READY_LIST + 32 * currentPID;
+
+		// set the state field for the current PCB 
+		[currentPCB + 1] = 1; // Set STATE to READY
+
+		// store back the current registers to the PCB of the current process
+		// store BP and SP - 1
+		// SP - 1 because when an interrupt occurs, the value of IP is stored
+		// automatically on the top of the stack and SP is incremented
+		// hence SP - 1 is the correct value.
+
+		[currentPCB + 2] = BP;
+		[currentPCB + 3] = SP - 1;
+
+		// next we need to set the IP field
+		// when a timer occurs IP value gets stored in the stack
+		// the timer interrupt routine should fetch this value from the 
+		// stack and save it in the PCB of the current process
+		// you will have to convert from logical to physical address because
+		// once the interrupt is fired you're in the KERNEL mode
+
+		alias physicalSP S2;
+		physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
+
+		// IP of the current process is on top of the stack
+		// save this value
+		[currentPCB + 4] = [physicalSP];
+
+		// set PTBR and PTLR
+		[currentPCB + 5] = PTBR;
+		[currentPCB + 6] = PTLR;
+
+		// back up the value of registers R0-R7
+		[currentPCB + 7] = R0;
+		[currentPCB + 8] = R1;
+		[currentPCB + 9] = R2;
+		[currentPCB + 10] = R3;
+		[currentPCB + 11] = R4;
+		[currentPCB + 12] = R5;
+		[currentPCB + 13] = R6;
+		[currentPCB + 14] = R7;
+
+		// OK, saved state of current process
+
+		// load the details of the next process
+		// fetch all values EXCEPT IP from newPCB and load it into memory
+		
+		// set the values of SP and BP
+		BP = [newPCB + 2];
+		SP = [newPCB + 3];	
+		
+		// set PTBR and PTLR
+		PTBR = [newPCB + 5];
+		PTLR = [newPCB + 6];
+		
+		// set the value of registers R0 - R7
+		R0 = [newPCB + 7];
+		R1 = [newPCB + 8];
+		R2 = [newPCB + 9];
+		R3 = [newPCB + 10];
+		R4 = [newPCB + 11];
+		R5 = [newPCB + 12];
+		R6 = [newPCB + 13];
+		R7 = [newPCB + 14];
+		
+		// set the IP field		
+		// but you can't directly manipulate IP
+		// we need the execution to start from IP for which you have to put it on top
+		// of the stack of the new process
+		// think about it -- after an interrupt routine has finished execution, we
+		// pop off the IP value from the stack of the current process (the process that caused
+		// the exception) and then continue executing it
+		// here the two processes -- the one before and after the interrupt, are obviously different
+		// clever but complicated exploitation of the interrupt mechanism
+		
+		SP = SP + 1;
+		alias newPhysicalSP S2;
+		newPhysicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
+		[newPhysicalSP] = [newPCB + 4];
+		
+		// set the state field of the new process to running
+		[newPCB + 1] = 2;
+		
+		// we have a new process
+		// so no need to continue loop further
+		break;
+		
+	endif;
+	
+	// the current newPID was not in READY state
+	// try the next one
+	newPID = newPID + 1;
+	
 endwhile;
-BP=[newPCB + 2];
-SP=[newPCB + 3];
-PTBR=[newPCB + 5];
-PTLR=[newPCB + 6];
-R0=[newPCB + 7];
-R1=[newPCB + 8];
-R2=[newPCB + 9];
-R3=[newPCB + 10];
-R4=[newPCB + 11];
-R5=[newPCB + 12];
-R6=[newPCB + 13];
-R7=[newPCB + 14];
-SP = SP + 1;
-newphysicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
-[newphysicalSP ] = [newPCB + 4 ];
-[newPCB + 1] = 2;
+
+// no need to check for currentPID again because if the above loop does not change any value,
+// the value of registers are not changed and all is already well :-)
+
+// done, transfer control to new process
 ireturn;
+
