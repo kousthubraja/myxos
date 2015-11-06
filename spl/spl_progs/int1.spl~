@@ -1,0 +1,217 @@
+
+
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
+
+
+
+alias sysCallNo S1;
+sysCallNo = [physicalSP - 1];
+
+
+
+alias fileName S2;
+fileName = [physicalSP - 3];	
+
+if (sysCallNo == 1) then
+
+	
+	
+	alias FATIndex S3;
+	FATIndex = 0;
+	
+	// total 64 
+	
+	
+	while (FATIndex < 64) do
+		
+		if ([FAT + FATIndex * 8] == fileName) then
+		         // found
+			[physicalSP - 2] = 0;
+			ireturn;
+			
+		endif;
+		
+		FATIndex = FATIndex + 1;	
+		
+	endwhile;
+	
+
+	
+	alias DFListIndex S4;	
+	DFListIndex = 0;
+	
+	while (DFListIndex < 447) do		
+		if ([FAT + 512 + DFListIndex] == 0) then		
+			break;
+		endif;				
+		DFListIndex = DFListIndex + 1;			
+	endwhile;
+	
+	if (DFListIndex == 447) then		
+		// full
+		[physicalSP - 2] = -1;
+		ireturn;			
+	endif;
+	
+
+	
+	FATIndex = 0;
+	while (FATIndex < 64) do	
+		if ([FAT + FATIndex * 8 + 2] == -1) then
+			break;		
+		endif;		
+		FATIndex = FATIndex + 1;	
+	endwhile;
+	
+	if (FATIndex == 64) then
+		[physicalSP - 2] = -1;
+		ireturn;	
+	endif;
+	
+	
+	[FAT + FATIndex * 8] = fileName;
+	[FAT + FATIndex * 8 + 1] = 0;	
+	[FAT + FATIndex * 8 + 2] = DFListIndex;	
+	
+	
+	load(1, DFListIndex);
+				
+	
+	alias ctr S5;
+	ctr = 0;	
+	
+	while (ctr < 256) do
+		[SCRATCHPAD + ctr] = -1;
+		ctr = ctr + 1;
+	endwhile;
+	
+	
+	store(1, DFListIndex);
+	
+	[FAT + 512 + DFListIndex] = 1;
+	
+	//  updated  FAT and DFL
+	store(5, 19);	
+	store(6, 20);	
+	
+	
+	[physicalSP - 2] = 0;
+	ireturn;	
+	
+endif;
+
+if (sysCallNo == 4) then
+
+	// Delete
+	
+	
+	
+	alias FATIndex S3;
+	FATIndex = 0;
+	
+	
+	
+	while (FATIndex < 64) do
+	
+		if ([FAT + FATIndex * 8] == fileName) then
+			break;			
+			
+		endif;
+		
+		FATIndex = FATIndex + 1;	
+		
+	endwhile;
+	
+	if (FATIndex == 64) then
+	
+		// not found
+			
+		[physicalSP - 2] = -1;
+		ireturn;
+	
+	endif;
+	
+	
+	alias SWOFTIndex S4;
+	SWOFTIndex = 0;
+	
+	while (SWOFTIndex < 64) do
+	
+		if ([SWOFTIndex * 2 + FILE_TABLE] == FATIndex) then
+			break;
+			
+		endif;
+		
+		SWOFTIndex = SWOFTIndex + 1;
+		
+	endwhile;
+	
+	
+	
+	if (SWOFTIndex < 64 && [SWOFTIndex * 2 + FILE_TABLE + 1] > 0) then
+	
+		// opened **
+		
+		[physicalSP - 2] = -1;
+		ireturn;
+	
+	endif;
+	
+	alias basicDBNo S5;	// Delete **
+	 
+	basicDBNo = 0;
+	
+	alias blockToClear S6;
+	alias counter S7;
+	
+	while (basicDBNo < 256) do
+	
+		// load the basic block 
+		load(1, [FAT + FATIndex * 8 + 2]);
+		
+		blockToClear = [SCRATCHPAD + basicDBNo];
+		basicDBNo = basicDBNo + 1;
+		if (blockToClear == -1) then
+			continue;
+		endif;
+		
+		// only 1 scratchpad **
+		load(1, blockToClear);
+		counter = 0;
+		//crear with free space **
+                while (counter < 512) do
+		
+			[SCRATCHPAD + counter] = "";		
+			counter = counter + 1;
+		
+		endwhile;
+		store(1, blockToClear);
+	
+		// DFL in 3072 
+		[3072 + blockToClear] = 0;
+	
+	endwhile;
+	
+	// erase all values of the basic block 
+	
+	load(1, [FAT + FATIndex * 8 + 2]);
+	counter = 0;
+	while (counter < 512) do
+		[SCRATCHPAD + counter] = "";
+		counter = counter + 1;	
+	endwhile;
+	store(1, [FAT + FATIndex * 8 + 2]);
+	
+	// Free FAT entry **
+	[FAT + FATIndex * 8] = -1;
+	[FAT + FATIndex * 8 + 2] = -1;
+	
+	// update FAT , DFL
+	store(5, 19);	
+	store(6, 20);	
+	
+	[physicalSP - 2] = 0;
+	ireturn;
+	
+endif;

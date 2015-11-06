@@ -1,0 +1,183 @@
+// Code for Interrupt 6
+
+// get the system call number
+// it will be stored in location SP - 1
+// since code is executing in kernel mode, convert to physical address first
+
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
+
+// find out the system call number
+
+alias sysCallNo S1;
+sysCallNo = [physicalSP - 1];
+
+// fetch the argument(s) from SP - 2 onwards
+// there is only one argument
+
+alias fileName S2;
+fileName = [physicalSP - 3];	// note the three, not two
+
+alias PID S8;
+PID = (PTBR - 1024) / 8;
+
+alias currentPCB S9;
+currentPCB = READY_LIST + 32 * PID;
+
+alias counter S3;
+
+if (sysCallNo == 9) then
+
+	// Exec() system call
+	
+	// check if file exists
+	
+	alias FATIndex S4;
+	FATIndex = 0;
+	
+	// there can be max 64 files
+	// each FAT entry takes 8 words	
+	while (FATIndex < 64) do	
+		if ([FAT + FATIndex * 8] == fileName) then
+			break;			
+		endif;		
+		FATIndex = FATIndex + 1;	
+	endwhile;
+	
+	if (FATIndex == 64) then	
+		// file does not exist			
+		[physicalSP - 2] = -1;
+		ireturn;	
+	endif;
+	
+	// load the basic block onto the OS scratchpad
+	load(1, [FAT + FATIndex * 8 + 2]);
+	
+	// count the number of code blocks of the new program
+	alias countCodeBlocksNew S5;
+	countCodeBlocksNew = 0;
+	counter = 0;
+	while (counter < 256) do
+		// NOTE: The condition [SCRATCHPAD + counter] != -1 has NOT been used because
+		// for some reason loading using the --exec parameter creates only three entries
+		// in the basic block of the file (as is right if the file was a proper executable)
+		// here we're actually checking if the parameter to Exec() is indeed an executable
+		// so I guess we have no option but to loop 256 times
+		if ([SCRATCHPAD + counter] > 0 && [SCRATCHPAD + counter] < 512) then
+			countCodeBlocksNew = countCodeBlocksNew + 1;
+		endif;
+		counter = counter + 1;
+	endwhile;
+	
+	if (countCodeBlocksNew > 3) then
+		// invalid file, program can have only three pages of code
+		[physicalSP - 2] = -1;
+		ireturn;
+	endif;
+	
+	// find the number of valid page table entries for the old process
+	alias validCodeBlocksOld S6;
+	validCodeBlocksOld = 0;
+	
+	counter = 0;
+	while (counter < 3) do	// three because 4th one is needed anyway for the stack
+		if ([PTBR + counter * 2 + 1] == "01" || [PTBR + counter * 2 + 1] == "11") then
+			validCodeBlocksOld = validCodeBlocksOld + 1;
+		endif;
+		counter = counter + 1;
+	endwhile;
+	
+	if (validCodeBlocksOld > countCodeBlocksNew) then
+		// deallocate the last few page tables as (un)necessary
+		while (validCodeBlocksOld != countCodeBlocksNew) do
+			validCodeBlocksOld = validCodeBlocksOld - 1;	// this step needs to be done first
+			// this is because validCodeBlocksOld could be 3, and we don't want to invalidate the
+			// 6th and 7th entries in the page table (they're for the stack)
+			[PTBR + validCodeBlocksOld * 2 + 1] = "00";
+			[PTBR + validCodeBlocksOld * 2] = -1;
+		endwhile;
+	endif;
+	
+	if (validCodeBlocksOld < countCodeBlocksNew) then
+	
+		// we need to allocate a few more blocks
+		// but first check if there's enough space in memory free list
+		alias newPagesCount S7;
+		newPagesCount = countCodeBlocksNew - validCodeBlocksOld;
+		counter = 0;
+		while (counter < 64 && newPagesCount > 0) do
+			if ([MEM_LIST + counter] == 0) then
+				newPagesCount = newPagesCount - 1;
+			endif;
+			counter = counter + 1;
+		endwhile;
+		if (counter == 64) then
+			// not enough memory
+			[physicalSP - 2] = -1;
+			ireturn;
+		endif;
+		
+		// allot new memory for page table
+		
+		newPagesCount = countCodeBlocksNew - validCodeBlocksOld;
+		counter = 0;
+		
+		while (counter < 64 && newPagesCount > 0) do
+		
+			if ([MEM_LIST + counter] != 0) then	// block already used
+				counter = counter + 1;
+				continue;
+			endif;
+			
+			// unused block, allocate
+			
+			[MEM_LIST + counter] = 1;
+			[PTBR + (countCodeBlocksNew - newPagesCount) * 2] = counter;
+			[PTBR + (countCodeBlocksNew - newPagesCount) * 2 + 1] = "01";
+			
+			newPagesCount = newPagesCount - 1;	// careful, this order is important too
+						
+			counter = counter + 1;
+			
+		endwhile;
+		
+	endif;
+		
+	// required pages have been allocated
+	// load the blocks of the program into pages of the current process
+		
+	counter = 0;
+	while (counter < countCodeBlocksNew) do
+		load([PTBR + counter * 2], [SCRATCHPAD + counter]);
+		counter = counter + 1;
+	endwhile;
+		
+	// close all files opened by the current process
+		
+	counter = 0;
+	while (counter < 8) do
+		if ([currentPCB + 15 + counter * 2] != -1) then				
+			// we have a valid index to SWOFT
+			// index into it and decrement file count
+			[FILE_TABLE + [currentPCB + 15 + counter * 2] * 2 + 1] = [FILE_TABLE + [currentPCB + 15 + counter * 2] * 2 + 1] - 1;
+			if ([FILE_TABLE + [currentPCB + 15 + counter * 2] * 2 + 1] == 0) then				
+				// there are no more references to the file
+				// invalidate the entry in SWOFT					
+				[FILE_TABLE + [currentPCB + 15 + counter * 2] * 2] = -1;
+			endif;
+			// invalidate the PPOFT by setting fields to -1
+			[currentPCB + 15 + counter * 2] = -1;
+			[currentPCB + 15 + counter * 2 + 1] = -1;	
+		endif;
+		counter = counter + 1;
+	endwhile;
+		
+	// reset SP to 3 * 512
+	SP = 3 * 512;
+		
+	// store zero on top of the stack
+	physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
+	[physicalSP] = 0;
+	ireturn;	// WHAT ABOUT THE RETURN VALUE?
+
+endif;

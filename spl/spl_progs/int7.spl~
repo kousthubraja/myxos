@@ -1,0 +1,130 @@
+// Code for Interrupt 7
+
+// get the system call number
+// it will be stored in location SP - 1
+// since code is executing in kernel mode, convert to physical address first
+
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
+
+// find out the system call number
+
+alias sysCallNo S1;
+sysCallNo = [physicalSP - 1];
+
+
+if (sysCallNo == 10) then
+
+	// implementation of Exit()
+	
+	// search for any ready process in ready list
+	
+	alias nextPID S2;
+	nextPID = 0;
+	while (nextPID < 32) do
+		if ([READY_LIST + 32 * nextPID + 1] == 1) then
+			break;
+		endif;
+		nextPID = nextPID + 1;
+	endwhile;
+	
+	if (nextPID == 32) then
+		// no more processes in ready list
+		// simply halt
+		halt;
+	endif;
+	
+	// we have a process to be executed
+	
+	alias currentPCB S3;
+	currentPCB = READY_LIST + ((PTBR - 1024) / 8) * 32; // (PTBR - 1024) / 8) is PID of the current process
+	
+	// close all open instances of files by current process
+	
+	alias counter S4;
+		
+	counter = 0;
+	while (counter < 8) do
+		if ([currentPCB + 15 + counter * 2] != -1) then				
+			// we have a valid index to SWOFT
+			// index into it and decrement file count
+			[FILE_TABLE + [currentPCB + 15 + counter * 2] * 2 + 1] = [FILE_TABLE + [currentPCB + 15 + counter * 2] * 2 + 1] - 1;
+			if ([FILE_TABLE + [currentPCB + 15 + counter * 2] * 2 + 1] == 0) then				
+				// there are no more references to the file
+				// invalidate the entry in SWOFT					
+				[FILE_TABLE + [currentPCB + 15 + counter * 2] * 2] = -1;
+			endif;
+			// invalidate the PPOFT by setting fields to -1
+			[currentPCB + 15 + counter * 2] = -1;
+			[currentPCB + 15 + counter * 2 + 1] = -1;	
+		endif;
+		counter = counter + 1;
+	endwhile;
+	
+	// set state as terminated
+	[currentPCB + 1] = 0;
+	
+	// free the entries of the page table
+	counter = 0;
+	while (counter < 4) do
+		if ([PTBR + counter * 2] == -1) then
+			// already invalid
+			counter = counter + 1;
+			continue;
+		endif;
+		// valid page table
+		// set memory location as free in memory list
+		[MEM_LIST + [PTBR + counter * 2]] = 0;
+		// invalidate entries in PTBR
+		[PTBR + counter * 2] = -1;
+		// set auxiliary info to not valid
+		[PTBR + counter * 2 + 1] = "00";
+		counter = counter + 1;
+	endwhile;
+	
+	// we've already found out the next 'ready' process
+	// load its context as in timer.spl (copied)
+	
+	alias newPCB S5;
+	newPCB = READY_LIST + nextPID * 32;
+	
+	// set the values of SP and BP
+	BP = [newPCB + 2];
+	SP = [newPCB + 3];	
+		
+	// set PTBR and PTLR
+	PTBR = [newPCB + 5];
+	PTLR = [newPCB + 6];
+		
+	// set the value of registers R0 - R7
+	R0 = [newPCB + 7];
+	R1 = [newPCB + 8];
+	R2 = [newPCB + 9];
+	R3 = [newPCB + 10];
+	R4 = [newPCB + 11];
+	R5 = [newPCB + 12];
+	R6 = [newPCB + 13];
+	R7 = [newPCB + 14];
+		
+	// set the IP field		
+	// but you can't directly manipulate IP
+	// we need the execution to start from IP for which you have to put it on top
+	// of the stack of the new process
+	// think about it -- after an interrupt routine has finished execution, we
+	// pop off the IP value from the stack of the current process (the process that caused
+	// the exception) and then continue executing it
+	// here the two processes -- the one before and after the interrupt, are obviously different
+	// clever but complicated exploitation of the interrupt mechanism
+	
+	SP = SP + 1;
+	alias newPhysicalSP S6;
+	newPhysicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
+	[newPhysicalSP] = [newPCB + 4];
+	
+	// set the state field of the new process to running
+	[newPCB + 1] = 2;
+	
+	// transfer control to the new process
+	ireturn;
+
+endif;

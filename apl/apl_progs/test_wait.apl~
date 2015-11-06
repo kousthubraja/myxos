@@ -1,0 +1,24 @@
+integer main()
+{
+	integer pid;
+	pid = Fork();
+	if (pid == -2) then
+		// child
+		pid = Exec("even.xsm");
+	endif;
+	// wait for child to finish
+	// ./xsm --timer=10 should not get you an interweaved output
+	integer status;
+	status = Wait(pid);
+	print(2);
+	print(4);
+	print(6);
+	print(8);
+	print(10);
+	print(12);
+	print(14);
+	print(16);
+	print(18);
+	print(20);
+	return 0;
+}

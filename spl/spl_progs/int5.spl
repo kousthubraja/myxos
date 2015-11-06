@@ -1,0 +1,197 @@
+// Code for Interrupt 5
+
+// get the system call number
+// it will be stored in location SP - 1
+// since code is executing in kernel mode, convert to physical address first
+
+alias physicalSP S0;
+physicalSP = ([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
+
+// find out the system call number
+
+alias sysCallNo S1;
+sysCallNo = [physicalSP - 1];
+
+alias PID S9;
+PID = (PTBR - 1024) / 8;
+
+if (sysCallNo == 8) then
+
+	// implementation of Fork() system call
+	
+	// find a PCB in the ready list of PCBs
+	// newPID is index of the PCB (say PCBIndex)
+	alias newPID S2;
+	newPID = 0;
+	while (newPID < 32) do
+		if ([READY_LIST + newPID * 32 + 1] == 0) then
+			break;
+		endif;
+		newPID = newPID + 1;	
+	endwhile;
+	
+	if (newPID == 32) then
+		[physicalSP - 2] = -1;
+		ireturn;
+	endif;
+	
+	// set the PID of the child process to that value
+	[READY_LIST + newPID * 32] = newPID;
+	
+	// duplicate the valid pages in memory of the currently
+	// executing parent process
+	
+	// count the number of valid pages used by the parent process
+	
+	alias parentPageCount S3;
+	parentPageCount = 0;
+	
+	alias counter S4;
+	counter = 0;
+	
+	// if PTLR is not exactly 4
+	// THIS WOULD FAIL!!
+	
+	while (counter < 4) do
+		if ([PTBR + counter * 2 + 1] == "01" || [PTBR + counter * 2 + 1] == "11") then
+			parentPageCount = parentPageCount + 1;
+		endif;
+		counter = counter + 1;
+	endwhile;
+	
+	// check if there exists same number of free pages in Memory Free list
+	
+	counter = 0;
+	
+	alias freePagesCount S5;
+	freePagesCount = 0;
+	while (counter < 64) do
+		if([MEM_LIST + counter] == 0) then
+			freePagesCount = freePagesCount + 1;
+		endif;
+		if (freePagesCount == parentPageCount) then
+			break;
+		endif;
+		counter = counter + 1;
+	endwhile;
+	
+	if (freePagesCount < parentPageCount) then
+		// not enough memory
+		[physicalSP - 2] = -1;
+		ireturn;
+	endif;
+	
+	// reusing S5, don't panic
+	alias freePageIndex S5;
+	alias wordIndex S6;	// to copy from one page to another
+	
+	alias childPTBR S7;
+	childPTBR = 1024 + newPID * 8;
+	counter = 0;
+	
+	// we are assured that there exists enough free pages in memory
+	// note: again, if PTLR isn't exactly four
+	// THIS WILL FAIL!!
+	
+	while (counter < 4) do
+	
+		if ([PTBR + counter * 2 + 1] == "00") then
+			// memory page hasn't been allocated
+			// so set the child process to reflect the same
+			// child PTBR will be 1024 + newPID * 8
+			[childPTBR + counter * 2 + 1] = "00";
+			// skip the rest of the code
+			counter = counter + 1;
+			continue;
+		endif;
+		
+		// otherwise we have a valid page to copy
+				
+		// find the next free page in memory
+		
+		freePageIndex = 0;
+		while (freePageIndex < 64) do
+			if ([MEM_LIST + freePageIndex] == 0) then
+				break;
+			endif;
+			freePageIndex = freePageIndex + 1;
+		endwhile;
+		
+		// assuming there will exist a valid free page index if
+		// the program gets this far in the code
+		
+		// set the index of the memory page as used
+		[MEM_LIST + freePageIndex] = 1;
+		
+		// copy the pages
+		
+		wordIndex = 0;
+		while (wordIndex < 512) do
+			// freePageIndex * 512 will be the physical address of the new page
+			// [PTBR + counter * 2] will be the physical page number of the old page
+			[freePageIndex * 512 + wordIndex] = [[PTBR + counter * 2] * 512 + wordIndex];
+			wordIndex = wordIndex + 1;
+		endwhile;
+		
+		// update the physical page number field and other entries
+		[childPTBR + counter * 2] = freePageIndex;
+		[childPTBR + counter * 2 + 1] = [PTBR + counter * 2 + 1];
+		
+		counter = counter + 1;
+		
+	endwhile;
+	
+	// set up entries of the child process' PCB
+	
+	// set BP
+	[READY_LIST + newPID * 32 + 2] = BP;
+	// set SP
+	// SP - 1 is used because the child process does not have the IP stored in its stack
+	[READY_LIST + newPID * 32 + 3] = SP - 1;
+	// set IP
+	// same as the IP of parent process because it is logical address
+	[READY_LIST + newPID * 32 + 4] = [physicalSP];
+	// set PTBR
+	[READY_LIST + newPID * 32 + 5] = childPTBR;
+	// set PTLR
+	[READY_LIST + newPID * 32 + 6] = 4;	
+	// set R0 through R7
+	[READY_LIST + newPID * 32 + 7] = R0;
+	[READY_LIST + newPID * 32 + 8] = R1;
+	[READY_LIST + newPID * 32 + 9] = R2;
+	[READY_LIST + newPID * 32 + 10] = R3;
+	[READY_LIST + newPID * 32 + 11] = R4;
+	[READY_LIST + newPID * 32 + 12] = R5;
+	[READY_LIST + newPID * 32 + 13] = R6;
+	[READY_LIST + newPID * 32 + 14] = R7;
+	// set the parent PID
+	[READY_LIST + newPID * 32 + 31] = PID;
+	
+	// PPOFT
+	
+	counter = 0;
+	while (counter < 8) do
+		[READY_LIST + newPID * 32 + 15 + counter * 2] = [READY_LIST + PID * 32 + 15 + counter * 2];	// pointer to SWOFT
+		[READY_LIST + newPID * 32 + 15 + counter * 2 + 1] = [READY_LIST + PID * 32 + 15 + counter * 2 + 1];	// LSEEK position
+		// increment the file open count in SWOFT
+		// [READY_LIST + PID * 32 + 15 + counter * 2] is SWOFT Index
+		[FILE_TABLE + [READY_LIST + PID * 32 + 15 + counter * 2] * 2 + 1] = [FILE_TABLE + [READY_LIST + PID * 32 + 15 + counter * 2] * 2 + 1] + 1;
+		counter = counter + 1;
+	endwhile;
+	
+	// set STATE of child to READY
+	[READY_LIST + newPID * 32 + 1] = 1;
+	
+	// set up return values
+	
+	// return value for parent is PID of child process
+	[physicalSP - 2] = newPID;
+	// return value for child is -2
+	// but we need to find the physical address of the stack
+	alias childPhysicalSP S8;
+	childPhysicalSP = ([childPTBR + 2 * ((SP - 1) / 512)] * 512) + ((SP - 1) % 512);
+	[childPhysicalSP - 1] = -2;
+	
+	ireturn;
+	
+endif;
